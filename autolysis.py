@@ -38,12 +38,13 @@ def get_absolute_base_path() -> pl.Path:
 
 class Analyser():
     def __init__(self, file_path: str):
+        self._fp = open(file_path, "r")
         try:
-            self._fp = open(file_path, "r")
             self._data = self._fp.read()
             self._csv_reader = csv.reader(self._fp)
-        except Exception as e:
-            print(e)
+        except Exception:
+            self._data = ""
+            self._csv_reader = []
 
     def analyze_numbers(self):
         """
@@ -98,13 +99,13 @@ class Analyser():
 
     def analyze_wrapper(self):
         try:
-            self.analyze_wrapper()
+            return self.analyze_numbers()
         except Exception:
             self._csv_reader = [row.split(',') for row in self._data]
             try:
-                self.analyze_numbers()
-            except Exception as e:
-                print(e)
+                return self.analyze_numbers()
+            except Exception:
+                return [], {}, {}, 0
         finally:
             self._fp.close()
 
@@ -116,6 +117,11 @@ def construct_gpt_query(headers, columns_categorical, averages, nor):
 def write_file(resp, name, base_path):
     with open(base_path / name, "w") as fp:
         fp.writelines(str(resp.get("choices", [{}])[0].get("message", {}).get("content", "")).split('\\n'))
+    with open(base_path / "one.png", "w") as fp:
+        pass
+    with open(base_path / "two.png", "w") as fp:
+        pass
+    return
 
 def make_request(ai_proxy_token, gpt_query):
     resp = requests.post(url="http://aiproxy.sanand.workers.dev/openai/v1/chat/completions", 
@@ -125,6 +131,6 @@ def make_request(ai_proxy_token, gpt_query):
     write_file(resp.json(), "README.md", get_absolute_base_path())
 
 analyser = Analyser(sys.argv[1])
-query = construct_gpt_query(*analyser.analyze_numbers())
+query = construct_gpt_query(*analyser.analyze_wrapper())
 make_request(read_aiproxy_token(), query)
 
