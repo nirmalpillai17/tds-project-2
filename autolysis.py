@@ -1,17 +1,18 @@
 # /// script
 # requires-python = ">=3.12"
 # dependencies = [
+#     "numpy",
 #     "requests",
 # ]
 # ///
 import os
 import sys
 import csv
+import numpy as np
 import pathlib as pl
 import logging as lg
 
 import requests
-
 # Define helper functions
 def read_aiproxy_token() -> str | None:
     """
@@ -37,40 +38,93 @@ def get_absolute_base_path() -> pl.Path:
 
 class Analyser():
     def __init__(self, file_path: str):
-        _fp = open(file_path, "r")
-        self._csv_reader = csv.reader(_fp)
-        self._base_path = get_absolute_base_path()
+        try:
+            self._fp = open(file_path, "r")
+            self._data = self._fp.read()
+            self._csv_reader = csv.reader(self._fp)
+        except Exception as e:
+            print(e)
 
-    def classify_attributes(self) -> dict[str, [str]]:
+    def analyze_numbers(self):
         """
-            * Classifies each data column as numerical or categorical
-            * returns a dictionary mapping each column as NUMERICAL or CATEGORICAL
+            * Calculates averages corresponding to numerical columns
+            * returns a dictionary mapping each numerical column to its averages
         """
-        labelled_attributes = {"Numerical":[], "Categorical":[]}
+        averages = {}
+        columns_numeric = {}
+        columns_categorical = {}
+        columns_categorical_copy = {}
         headers = []
-        for row in self._csv_reader:
+        nor = 0
+        for i, row in enumerate(self._csv_reader):
             # exclude the header row 
-            if self._csv_reader.line_num == 1:
+            if i == 0:
                 headers = row
             else:
-                for column, data in enumerate(row):
-                    if str(data).isdecimal() or str(data).isnumeric():
-                        labelled_attributes["Numerical"]\
-                                            .append(headers[column])
-                    else:
-                        labelled_attributes["Categorical"]\
-                                            .append(headers[column])
-                break
-        return labelled_attributes
+                for index, data in enumerate(row):
+                    if str(data).isalnum():
+                        if headers[index] not in columns_categorical:
+                            columns_categorical[headers[index]] = {}
+                        if str(data) in columns_categorical[headers[index]]:
+                            columns_categorical[headers[index]][str(data)] += 1
+                        else:
+                            columns_categorical[headers[index]][str(data)] = 1
+                    f_data = None
+                    i_data = None
+                    try:
+                        f_data = float(data)
+                    except Exception:
+                        pass
+                    try:
+                        i_data = int(data)
+                    except Exception:
+                        pass
+                    if headers[index] not in columns_numeric:
+                        columns_numeric[headers[index]] = []
+                    if f_data is not None:
+                        columns_numeric[headers[index]].append(f_data)
+                    elif i_data is not None:
+                        columns_numeric[headers[index]].append(i_data)
+                    nor += 1
+        for column in columns_categorical:
+            for s in columns_categorical[column]:
+                if columns_categorical[column][s] > 500:
+                    columns_categorical_copy[column] = columns_categorical[column]
+                    break
+        for column in columns_numeric:
+            averages[column] = list(map(float, [np.mean(columns_numeric[column]), np.median(columns_numeric[column])]))
 
-with open("README.md", "w") as fp:
-    pass
+        return headers, columns_categorical_copy, averages, nor
 
-with open("one.png", "w") as fp:
-    pass
+    def analyze_wrapper(self):
+        try:
+            self.analyze_wrapper()
+        except Exception:
+            self._csv_reader = [row.split(',') for row in self._data]
+            try:
+                self.analyze_numbers()
+            except Exception as e:
+                print(e)
+        finally:
+            self._fp.close()
 
-with open("two.png", "w") as fp:
-    pass
+
+def construct_gpt_query(headers, columns_categorical, averages, nor):
+    query_string = f"I want you to write a story by analyzing the column names, counts of categoric variables and mean,median of numeric variables. You should ignore any mean,median for numerical variables provided if the column name looks like a categorical variable. There are a total of {nor} rows in the dataset. The column names in the dataset are {','.join(headers)} and the categorical columns with the number of occurence of each unique data point is {str(columns_categorical)}. The numeric columns and corresponding mean and median are {str(averages)} respectively. You are free to make assumptions and narrate meaningful fictional details on the data. You should make the output readeable. It should be formatted well so that the reader would get a proper gist of the dataset."
+    return query_string
+
+def write_file(resp, name, base_path):
+    with open(base_path / name, "w") as fp:
+        fp.writelines(str(resp.get("choices", [{}])[0].get("message", {}).get("content", "")).split('\\n'))
+
+def make_request(ai_proxy_token, gpt_query):
+    resp = requests.post(url="http://aiproxy.sanand.workers.dev/openai/v1/chat/completions", 
+                  headers={"Content-Type": "application/json",
+                           "Authorization": f"Bearer {ai_proxy_token}"},
+                  data=r'{"model": "gpt-4o-mini", "messages": [{"role": "user", "content": "' + gpt_query + r'"}]}')
+    write_file(resp.json(), "README.md", get_absolute_base_path())
 
 analyser = Analyser(sys.argv[1])
-attributes = analyser.classify_attributes()
+query = construct_gpt_query(*analyser.analyze_numbers())
+make_request(read_aiproxy_token(), query)
+
